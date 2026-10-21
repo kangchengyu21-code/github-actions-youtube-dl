@@ -1,25 +1,58 @@
-name: ci
+name: Download YouTube Videos
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - playlist.txt
+      - .github/workflows/ci.yml
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  download:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
-    permissions:
-      contents: write
-      
     steps:
-      - name: Clone repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
-      - name: download
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install downloader
         run: |
-          git config --local user.email "justjavac@gmail.com"
-          git config --local user.name "迷渡"
-          git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git pull --rebase
-          ./bin/youtube-dl --config-location config.txt
-          git add .
-          git commit -m "download youtube video"
-          git push
+          python -m pip install -U "yt-dlp[default]"
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download videos
+        run: |
+          python -m yt_dlp \
+            --ignore-config \
+            --js-runtimes node \
+            --no-playlist \
+            --batch-file playlist.txt \
+            -f "bv*[height<=720]+ba/b[height<=720]" \
+            --merge-output-format mkv \
+            -o "downloaded/%(title).150B_%(id)s.%(ext)s"
+
+      - name: Save downloaded videos
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: youtube-videos
+          path: |
+            downloaded/*
+            !downloaded/*.part
+            !downloaded/*.ytdl
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
